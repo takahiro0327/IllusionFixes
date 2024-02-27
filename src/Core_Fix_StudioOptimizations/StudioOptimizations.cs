@@ -3,6 +3,7 @@ using BepInEx.Logging;
 using HarmonyLib;
 using Studio;
 using System;
+using System.Linq;
 using System.Text;
 using System.Collections;
 using System.Collections.Generic;
@@ -26,8 +27,46 @@ namespace IllusionFixes
         private void Awake()
         {
             Logger = base.Logger;
-            Harmony.CreateAndPatchAll(typeof(StudioOptimizations), GUID);
+            var harmony = Harmony.CreateAndPatchAll(typeof(StudioOptimizations), GUID);
             SetupMeasuringSceneLoad();
+
+            //Application.logMessageReceived += Application_logMessageReceived;
+
+            var filterMethodList = typeof(StudioOptimizations).GetMethods().Where(method => method.Name.StartsWith("LogFilterHander")).ToArray();
+            var paramTypeList = filterMethodList.Select( method => method.GetParameters().Select( param => param.ParameterType).ToArray() ).ToArray();
+
+            foreach ( var assembly in System.AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var debugType = assembly.GetType("UnityEngine.Debug");
+                if (debugType == null)
+                    continue;
+                
+                foreach( var method in debugType.GetMethods(AccessTools.all) )
+                {
+                    if( method.Name.StartsWith("Log") )
+                    {
+                        var paramTypes = method.GetParameters().Select(param => param.ParameterType).ToArray();
+
+                        for ( int i = 0; i < filterMethodList.Length; ++i )
+                        {
+                            if( paramTypeList[i].SequenceEqual(paramTypes) )
+                            {
+                                harmony.Patch(method, prefix: new HarmonyMethod(filterMethodList[i]));
+
+
+                                System.Console.WriteLine($"{method} {filterMethodList[i]}");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            
+        }
+
+        private void Application_logMessageReceived(string condition, string stackTrace, LogType type)
+        {
+            System.Console.WriteLine($"@@@ {type} {new System.Diagnostics.StackTrace()}");
         }
 
         /// <summary>
